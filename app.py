@@ -130,8 +130,8 @@ def normalized_variables(incoming: dict, current: dict | None = None) -> dict:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     if not request.session.get("authenticated"):
-        return templates.TemplateResponse("login.html", {"request": request, "error": ""})
-    return templates.TemplateResponse("index.html", {"request": request})
+        return templates.TemplateResponse(request=request, name="login.html", context={"error": ""})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 
 @app.post("/login")
@@ -139,7 +139,12 @@ async def login(request: Request, username: str = Form(...), password: str = For
     valid_user = hmac.compare_digest(username, APP_USERNAME)
     valid_pass = hmac.compare_digest(password, APP_PASSWORD)
     if not (valid_user and valid_pass):
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password."}, status_code=401)
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Invalid username or password."},
+            status_code=401,
+        )
     request.session.clear()
     request.session["authenticated"] = True
     return RedirectResponse("/", status_code=303)
