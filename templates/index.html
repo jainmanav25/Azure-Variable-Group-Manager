@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Azure Variable Group Manager</title>
+<style>
+:root{font:16px system-ui;color:#182230;background:#f3f5f8}*{box-sizing:border-box}
+body{margin:0}.top{background:#102a43;color:white;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+main{max-width:1050px;margin:24px auto;padding:0 16px}.card{background:white;border:1px solid #e1e6ed;border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 4px 18px #102a4308}
+h1{font-size:22px;margin:0}h2{font-size:18px;margin:0 0 12px}label{display:block;font-weight:650;margin:12px 0 6px}
+input[type=text],input[type=password],textarea,select{width:100%;padding:11px;border:1px solid #c8d0db;border-radius:8px;background:white;font:inherit}
+textarea{min-height:250px;font:13px ui-monospace,Consolas,monospace;resize:vertical}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.btn{border:0;border-radius:8px;padding:11px 16px;background:#1769d2;color:white;font-weight:700;cursor:pointer}.btn.secondary{background:#e8eef6;color:#183b63}.btn:disabled{opacity:.5;cursor:wait}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.muted{color:#5d6b7a;font-size:14px}.warning{background:#fff7e6;border:1px solid #f5d48a;padding:12px;border-radius:8px;color:#754c00}
+#status{white-space:pre-wrap;overflow-wrap:anywhere}.ok{color:#067647}.bad{color:#b42318}
+.top form{margin:0}.top button{background:#fff;color:#102a43;border:0;border-radius:7px;padding:8px 12px;cursor:pointer}
+@media(max-width:650px){.grid{grid-template-columns:1fr}.top{padding:14px}.card{padding:15px}}
+</style>
+</head>
+<body>
+<header class="top"><h1>Azure DevOps Variable Group Manager</h1><form method="post" action="/logout"><button>Logout</button></form></header>
+<main>
+<section class="card">
+<h2>1. JSON configuration</h2>
+<p class="muted">JSON upload/paste karo. Organization short name, project name, group name aur variables JSON mein hone chahiye.</p>
+<label for="file">Upload JSON file</label><input id="file" type="file" accept=".json,application/json">
+<label for="json">JSON preview / editor</label><textarea id="json" spellcheck="false" placeholder='{"organization":"your-org","project":"your-project","variableGroup":{"name":"APP-PROD","variables":{"ENV":{"value":"prod","isSecret":false}}}}'></textarea>
+<div class="actions"><button class="btn secondary" id="loadSample">Load sample</button><button class="btn secondary" id="validate">Validate JSON</button></div>
+</section>
+<section class="card">
+<h2>2. Authentication and update mode</h2>
+<div class="warning">PAT is sent only with the API request and is not saved by this app. Do not paste it into JSON or commit it to source control. Use HTTPS when deploying beyond localhost.</div>
+<label for="pat">Azure DevOps PAT</label><input id="pat" type="password" autocomplete="off" placeholder="Paste short-lived, least-privilege PAT" required>
+<label for="mode">If Variable Group already exists</label>
+<select id="mode"><option value="merge">Merge — add/update JSON variables; keep other variables</option><option value="replace">Replace — keep only variables present in JSON (destructive)</option></select>
+<p class="muted">Merge recommended. Replace can remove variables absent from JSON; use only after review.</p>
+<div class="actions"><button class="btn" id="apply">Create / Update Variable Group</button></div>
+</section>
+<section class="card"><h2>3. Result</h2><div id="status" class="muted">No operation performed yet.</div></section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const sample = {
+  organization: "YOUR_ORG",
+  project: "YOUR_PROJECT",
+  variableGroup: {
+    name: "APP-PROD-CONFIG",
+    description: "Managed from JSON",
+    variables: {
+      APP_ENV: { value: "production", isSecret: false },
+      API_URL: { value: "https://api.example.com", isSecret: false },
+      DB_PASSWORD: { value: "replace-me-before-use", isSecret: true }
+    }
+  }
+};
+$("loadSample").onclick = () => { $("json").value = JSON.stringify(sample, null, 2); };
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("json").value = await f.text();
+});
+async function callApi(path, includePat=false) {
+  const fd = new FormData(); fd.append("file", $("json").value);
+  if (includePat) { fd.append("pat", $("pat").value); fd.append("mode", $("mode").value); }
+  const r = await fetch(path, {method:"POST", body:fd, headers:{"Accept":"application/json"}});
+  let data; try { data = await r.json(); } catch { data = {detail: await r.text()}; }
+  if (!r.ok) throw new Error(data.detail || `Request failed (${r.status})`);
+  return data;
+}
+$("validate").onclick = async () => {
+  $("status").textContent = "Validating...";
+  try {
+    const d = await callApi("/api/validate");
+    $("status").className = "ok";
+    $("status").textContent = `Valid JSON\nOrganization: ${d.organization}\nProject: ${d.project}\nGroup: ${d.groupName}\nVariables in JSON: ${d.variableCount}`;
+  } catch(e) { $("status").className = "bad"; $("status").textContent = e.message; }
+};
+$("apply").onclick = async () => {
+  if (!$("pat").value.trim()) { $("status").className="bad"; $("status").textContent="PAT enter karo."; return; }
+  let parsed;
+  try { parsed = JSON.parse($("json").value); } catch(e) { $("status").className="bad"; $("status").textContent="Invalid JSON: "+e.message; return; }
+  const mode = $("mode").value;
+  if (mode === "replace" && !confirm("Replace mode selected. Variables missing from JSON may be removed. Continue?")) return;
+  if (!confirm(`Azure DevOps group '${parsed?.variableGroup?.name || "(unknown)"}' par changes apply karne hain?`)) return;
+  $("apply").disabled = true; $("status").className="muted"; $("status").textContent="Applying changes...";
+  try {
+    const d = await callApi("/api/apply", true);
+    $("status").className="ok";
+    $("status").textContent = `${d.message}\nAction: ${d.action}\nProject: ${d.project}\nGroup ID: ${d.groupId}\nVariables in JSON: ${d.variableCountInPayload}\nMode: ${d.mode}`;
+    $("pat").value = "";
+  } catch(e) { $("status").className="bad"; $("status").textContent=e.message; }
+  finally { $("apply").disabled = false; }
+};
+</script>
+</body></html>

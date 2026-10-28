@@ -1,0 +1,22 @@
+{
+  "organization": "YOUR_ORG",
+  "project": "YOUR_PROJECT",
+  "variableGroup": {
+    "name": "APP-PROD-CONFIG",
+    "description": "Managed from JSON",
+    "variables": {
+      "APP_ENV": {
+        "value": "production",
+        "isSecret": false
+      },
+      "API_URL": {
+        "value": "https://api.example.com",
+        "isSecret": false
+      },
+      "DB_PASSWORD": {
+        "value": "replace-me-before-use",
+        "isSecret": true
+      }
+    }
+  }
+}
